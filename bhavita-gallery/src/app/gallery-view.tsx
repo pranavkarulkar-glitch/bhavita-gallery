@@ -19,16 +19,23 @@ function isVideo(mimeType: string) {
   return mimeType.startsWith("video/");
 }
 
+export type GallerySection = {
+  id: string;
+  title: string;
+  items: GalleryCard[];
+};
+
 export function GalleryView({
-  items,
+  sections,
   showSync,
 }: {
-  items: GalleryCard[];
+  sections: GallerySection[];
   showSync: boolean;
 }) {
   const [active, setActive] = useState<GalleryCard | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const itemCount = sections.reduce((sum, section) => sum + section.items.length, 0);
 
   useEffect(() => {
     if (!active) return;
@@ -46,16 +53,20 @@ export function GalleryView({
       const response = await fetch("/api/sync", { method: "POST" });
       const body = (await response.json().catch(() => null)) as {
         newItems?: number;
+        removed?: number;
         error?: string;
       } | null;
       if (!response.ok) {
         setSyncMessage(body?.error ?? "Sync failed");
         return;
       }
-      const count = body?.newItems ?? 0;
-      setSyncMessage(
-        count === 1 ? "1 new item found" : `${count} new items found`,
-      );
+      const added = body?.newItems ?? 0;
+      const removed = body?.removed ?? 0;
+      const parts = [
+        added === 1 ? "1 new item" : `${added} new items`,
+        removed === 1 ? "1 removed" : `${removed} removed`,
+      ];
+      setSyncMessage(parts.join(", "));
       window.setTimeout(() => window.location.reload(), 600);
     } catch {
       setSyncMessage("Sync failed");
@@ -73,7 +84,7 @@ export function GalleryView({
             Gallery
           </h1>
           <p className="mt-1 text-sm text-stone-600">
-            {items.length === 1 ? "1 item" : `${items.length} items`}
+            {itemCount === 1 ? "1 item" : `${itemCount} items`}
           </p>
         </div>
         {showSync ? (
@@ -93,29 +104,41 @@ export function GalleryView({
         ) : null}
       </header>
 
-      {items.length === 0 ? (
+      {itemCount === 0 ? (
         <p className="mt-16 text-center text-stone-600">
           Nothing here yet. Sync the gallery to pull photos and videos from Drive.
         </p>
       ) : (
-        <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {items.map((item) => (
-            <li key={item.driveFileId}>
-              <button
-                type="button"
-                onClick={() => setActive(item)}
-                className="group w-full text-left"
-              >
-                <Thumbnail item={item} />
-                {item.caption ? (
-                  <p className="mt-2 line-clamp-2 text-sm text-stone-600">
-                    {item.caption}
-                  </p>
-                ) : null}
-              </button>
-            </li>
+        <div className="mt-10 space-y-12">
+          {sections.map((section) => (
+            <section key={section.id}>
+              <h2 className="text-xl font-medium tracking-tight text-stone-900">
+                {section.title}
+              </h2>
+              <p className="mt-1 text-sm text-stone-500">
+                {section.items.length === 1 ? "1 item" : `${section.items.length} items`}
+              </p>
+              <ul className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 sm:gap-3 lg:grid-cols-8">
+                {section.items.map((item) => (
+                  <li key={item.driveFileId}>
+                    <button
+                      type="button"
+                      onClick={() => setActive(item)}
+                      className="group w-full text-left"
+                    >
+                      <Thumbnail item={item} />
+                      {item.caption ? (
+                        <p className="mt-1 line-clamp-2 text-xs text-stone-600">
+                          {item.caption}
+                        </p>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
 
       {active ? (
@@ -186,7 +209,7 @@ function Thumbnail({ item }: { item: GalleryCard }) {
   const video = isVideo(item.mimeType);
 
   return (
-    <span className="relative block aspect-square overflow-hidden rounded-2xl bg-stone-200">
+    <span className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-stone-200">
       {source ? (
         // Thumbnails prefer Drive's thumbnailLink. If that URL fails, fall back to our proxy.
         // eslint-disable-next-line @next/next/no-img-element
@@ -194,7 +217,7 @@ function Thumbnail({ item }: { item: GalleryCard }) {
           src={source}
           alt={item.caption || item.fileName}
           referrerPolicy="no-referrer"
-          className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+          className="max-h-full max-w-full object-contain"
           onError={() => {
             const fallback = `/api/thumb/${encodeURIComponent(item.driveFileId)}`;
             if (source !== fallback) setSource(fallback);
@@ -208,8 +231,8 @@ function Thumbnail({ item }: { item: GalleryCard }) {
       )}
       {video ? (
         <span className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-stone-950/55 text-white">
-            <svg viewBox="0 0 24 24" className="ml-1 h-6 w-6 fill-current" aria-hidden="true">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-stone-950/55 text-white">
+            <svg viewBox="0 0 24 24" className="ml-0.5 h-4 w-4 fill-current" aria-hidden="true">
               <path d="M8 5.5v13l11-6.5-11-6.5z" />
             </svg>
           </span>

@@ -3,12 +3,20 @@ import type { Readable } from "node:stream";
 
 const DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive.readonly"];
 
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
 export type DriveFile = {
   id: string;
   name: string;
   mimeType: string;
   thumbnailLink?: string;
   createdTime?: string;
+  folderPath: string;
+};
+
+export type DriveLibrary = {
+  rootName: string;
+  files: DriveFile[];
 };
 
 function privateKey() {
@@ -59,7 +67,7 @@ function isMedia(mimeType: string) {
   return mimeType.startsWith("image/") || mimeType.startsWith("video/");
 }
 
-export async function listDriveFiles(): Promise<DriveFile[]> {
+export async function listDriveFiles(): Promise<DriveLibrary> {
   const problems: string[] = [];
   try {
     normalizedPrivateKey();
@@ -81,39 +89,61 @@ export async function listDriveFiles(): Promise<DriveFile[]> {
   }
 
   const drive = getDrive();
-  const safeFolderId = (folderId as string).replace(/'/g, "\\'");
+  const root = await drive.files.get({
+    fileId: folderId,
+    fields: "name",
+    supportsAllDrives: true,
+  });
+  const rootName = root.data.name || "Gallery";
   const files: DriveFile[] = [];
-  let pageToken: string | undefined;
+  const pending: { id: string; path: string }[] = [{ id: folderId as string, path: "" }];
+  const seenFolders = new Set<string>();
 
-  do {
-    const response = await drive.files.list({
-      q: `'${safeFolderId}' in parents and trashed = false and (mimeType contains 'image/' or mimeType contains 'video/')`,
-      fields:
-        "nextPageToken, files(id, name, mimeType, thumbnailLink, createdTime)",
-      pageSize: 100,
-      pageToken,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || seenFolders.has(current.id)) continue;
+    seenFolders.add(current.id);
 
-    for (const file of response.data.files ?? []) {
-      if (!file.id || !file.name || !file.mimeType || !isMedia(file.mimeType)) {
-        continue;
+    const safeFolderId = current.id.replace(/'/g, "\\'");
+    let pageToken: string | undefined;
+
+    do {
+      const response = await drive.files.list({
+        q: `'${safeFolderId}' in parents and trashed = false`,
+        fields:
+          "nextPageToken, files(id, name, mimeType, thumbnailLink, createdTime)",
+        pageSize: 100,
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      for (const file of response.data.files ?? []) {
+        if (!file.id || !file.name || !file.mimeType) continue;
+
+        if (file.mimeType === FOLDER_MIME) {
+          const path = current.path ? `${current.path} / ${file.name}` : file.name;
+          pending.push({ id: file.id, path });
+          continue;
+        }
+
+        if (!isMedia(file.mimeType)) continue;
+
+        files.push({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType,
+          thumbnailLink: file.thumbnailLink ?? undefined,
+          createdTime: file.createdTime ?? undefined,
+          folderPath: current.path,
+        });
       }
 
-      files.push({
-        id: file.id,
-        name: file.name,
-        mimeType: file.mimeType,
-        thumbnailLink: file.thumbnailLink ?? undefined,
-        createdTime: file.createdTime ?? undefined,
-      });
-    }
+      pageToken = response.data.nextPageToken ?? undefined;
+    } while (pageToken);
+  }
 
-    pageToken = response.data.nextPageToken ?? undefined;
-  } while (pageToken);
-
-  return files;
+  return { rootName, files };
 }
 
 export async function getDriveFileMetadata(fileId: string) {
@@ -151,7 +181,9 @@ export async function getDriveThumbnail(fileId: string) {
   const thumbnailLink = metadata.thumbnailLink;
   if (!thumbnailLink) return null;
 
-  const sized = thumbnailLink.replace(/=s\d+/, "=s800");
+  const sized = thumbnailLink
+    .replace(/=w\d+-h\d+(?:-[a-z0-9-]+)*/i, "=s400")
+    .replace(/=s\d+(?:-[a-z0-9-]+)*/i, "=s400");
   let image = await fetch(sized);
   if (!image.ok) {
     const accessToken = await getAuth().getAccessToken();

@@ -10,7 +10,7 @@ type ExistingItem = {
 
 export async function POST() {
   try {
-    const files = await listDriveFiles();
+    const { files } = await listDriveFiles();
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("gallery_items")
@@ -55,9 +55,18 @@ export async function POST() {
       if (updateError) throw updateError;
     }
 
-    const newItems = fresh.length;
+    const seen = new Set(files.map((file) => file.id));
+    const stale = [...existing.keys()].filter((id) => !seen.has(id));
+    for (let index = 0; index < stale.length; index += 100) {
+      const chunk = stale.slice(index, index + 100);
+      const { error: deleteError } = await supabase
+        .from("gallery_items")
+        .delete()
+        .in("drive_file_id", chunk);
+      if (deleteError) throw deleteError;
+    }
 
-    return NextResponse.json({ newItems });
+    return NextResponse.json({ newItems: fresh.length, removed: stale.length });
   } catch (error) {
     console.error("Gallery sync failed", error);
     const message = error instanceof Error ? error.message : "";

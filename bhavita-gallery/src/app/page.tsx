@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { listDriveFiles } from "@/lib/drive";
 import { createAdminClient } from "@/lib/supabase";
-import { GalleryView, type GalleryCard } from "./gallery-view";
+import { GalleryView, type GallerySection } from "./gallery-view";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +14,10 @@ type GalleryRow = {
   created_at: string;
 };
 
-function largerThumbnail(url: string) {
-  return url.replace(/=s\d+/, "=s800");
+function fullThumbnail(url: string) {
+  return url
+    .replace(/=w\d+-h\d+(?:-[a-z0-9-]+)*/i, "=s400")
+    .replace(/=s\d+(?:-[a-z0-9-]+)*/i, "=s400");
 }
 
 export default async function Home({
@@ -45,25 +47,62 @@ export default async function Home({
     throw error;
   }
 
-  let thumbnails = new Map<string, string>();
+  const rows = (data ?? []) as GalleryRow[];
+  let sections: GallerySection[] = [
+    {
+      id: "root",
+      title: "Gallery",
+      items: rows.map((item) => ({
+        driveFileId: item.drive_file_id,
+        fileName: item.file_name,
+        mimeType: item.mime_type,
+        caption: item.caption,
+        thumbnailLink: null,
+      })),
+    },
+  ];
+
   try {
-    const driveFiles = await listDriveFiles();
-    thumbnails = new Map(
-      driveFiles
-        .filter((file) => file.thumbnailLink)
-        .map((file) => [file.id, largerThumbnail(file.thumbnailLink as string)]),
-    );
+    const library = await listDriveFiles();
+    const driveById = new Map(library.files.map((file) => [file.id, file]));
+    const grouped = new Map<string, GallerySection>();
+
+    for (const item of rows) {
+      const driveFile = driveById.get(item.drive_file_id);
+      if (!driveFile) continue;
+
+      const sectionId = driveFile.folderPath || "root";
+      const section = grouped.get(sectionId) ?? {
+        id: sectionId,
+        title: driveFile.folderPath || library.rootName,
+        items: [],
+      };
+      section.items.push({
+        driveFileId: item.drive_file_id,
+        fileName: item.file_name,
+        mimeType: item.mime_type,
+        caption: item.caption,
+        thumbnailLink: driveFile.thumbnailLink
+          ? fullThumbnail(driveFile.thumbnailLink)
+          : null,
+      });
+      grouped.set(sectionId, section);
+    }
+
+    sections = [...grouped.values()].sort((left, right) => {
+      if (left.id === "root") return -1;
+      if (right.id === "root") return 1;
+      return left.title.localeCompare(right.title);
+    });
   } catch (driveError) {
-    console.error("Failed to load Drive thumbnails", driveError);
+    console.warn(
+      driveError instanceof Error ? driveError.message : "Failed to load Drive folders",
+    );
   }
 
-  const items: GalleryCard[] = ((data ?? []) as GalleryRow[]).map((item) => ({
-    driveFileId: item.drive_file_id,
-    fileName: item.file_name,
-    mimeType: item.mime_type,
-    caption: item.caption,
-    thumbnailLink: thumbnails.get(item.drive_file_id) ?? null,
-  }));
+  if (sections.length === 1 && sections[0].items.length === 0) {
+    sections = [];
+  }
 
-  return <GalleryView items={items} showSync={admin === "true"} />;
+  return <GalleryView sections={sections} showSync={admin === "true"} />;
 }
