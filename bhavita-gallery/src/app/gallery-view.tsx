@@ -109,34 +109,13 @@ export function GalleryView({
           Nothing here yet. Sync the gallery to pull photos and videos from Drive.
         </p>
       ) : (
-        <div className="mt-10 space-y-12">
+        <div className="mt-10 space-y-3">
           {sections.map((section) => (
-            <section key={section.id}>
-              <h2 className="text-xl font-medium tracking-tight text-stone-900">
-                {section.title}
-              </h2>
-              <p className="mt-1 text-sm text-stone-500">
-                {section.items.length === 1 ? "1 item" : `${section.items.length} items`}
-              </p>
-              <ul className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 sm:gap-3 lg:grid-cols-8">
-                {section.items.map((item) => (
-                  <li key={item.driveFileId}>
-                    <button
-                      type="button"
-                      onClick={() => setActive(item)}
-                      className="group w-full text-left"
-                    >
-                      <Thumbnail item={item} />
-                      {item.caption ? (
-                        <p className="mt-1 line-clamp-2 text-xs text-stone-600">
-                          {item.caption}
-                        </p>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <FolderSection
+              key={section.id}
+              section={section}
+              onOpen={setActive}
+            />
           ))}
         </div>
       )}
@@ -199,6 +178,59 @@ export function GalleryView({
         </div>
       ) : null}
     </main>
+  );
+}
+
+function FolderSection({
+  section,
+  onOpen,
+}: {
+  section: GallerySection;
+  onOpen: (item: GalleryCard) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const countLabel =
+    section.items.length === 1 ? "1 item" : `${section.items.length} items`;
+
+  return (
+    <section className="rounded-2xl bg-white/70 ring-1 ring-stone-200">
+      <h2>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+        >
+          <span>
+            <span className="block text-lg font-medium tracking-tight text-stone-900">
+              {section.title}
+            </span>
+            <span className="mt-0.5 block text-sm text-stone-500">{countLabel}</span>
+          </span>
+          <span className="text-sm text-stone-500" aria-hidden="true">
+            {open ? "Hide" : "Show"}
+          </span>
+        </button>
+      </h2>
+      {open ? (
+        <ul className="grid grid-cols-4 gap-2 px-4 pb-4 sm:grid-cols-6 sm:gap-3 lg:grid-cols-8">
+          {section.items.map((item) => (
+            <li key={item.driveFileId}>
+              <button
+                type="button"
+                onClick={() => onOpen(item)}
+                className="group w-full text-left"
+              >
+                <Thumbnail item={item} />
+                {item.caption ? (
+                  <p className="mt-1 line-clamp-2 text-xs text-stone-600">{item.caption}</p>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
