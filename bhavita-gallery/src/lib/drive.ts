@@ -59,6 +59,12 @@ function getAuth() {
   });
 }
 
+export async function getDriveAccessToken() {
+  const accessToken = await getAuth().getAccessToken();
+  if (typeof accessToken === "string") return accessToken;
+  return accessToken?.token ?? null;
+}
+
 function getDrive() {
   return google.drive({ version: "v3", auth: getAuth() });
 }

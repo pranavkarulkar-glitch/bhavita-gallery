@@ -1,10 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { AUTH_COOKIE, isValidSessionToken } from "@/lib/auth";
-import { getDriveThumbnail } from "@/lib/drive";
 import { createAdminClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
+
+const THUMB_BUCKET = "gallery-thumbs";
 
 export async function GET(
   _request: Request,
@@ -24,28 +25,26 @@ export async function GET(
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("gallery_items")
-    .select("hidden")
+    .select("thumb_path, hidden")
     .eq("drive_file_id", id)
     .maybeSingle();
 
-  if (error || !data || data.hidden) {
+  if (error || !data || data.hidden || !data.thumb_path) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  try {
-    const thumbnail = await getDriveThumbnail(id);
-    if (!thumbnail?.body) {
-      return NextResponse.json({ error: "No thumbnail" }, { status: 404 });
-    }
+  const { data: file, error: downloadError } = await supabase.storage
+    .from(THUMB_BUCKET)
+    .download(data.thumb_path as string);
 
-    return new Response(thumbnail.body, {
-      headers: {
-        "Content-Type": thumbnail.contentType,
-        "Cache-Control": "private, max-age=3600",
-      },
-    });
-  } catch (thumbnailError) {
-    console.error("Failed to load thumbnail", thumbnailError);
-    return NextResponse.json({ error: "Could not load thumbnail" }, { status: 502 });
+  if (downloadError || !file) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  return new Response(await file.arrayBuffer(), {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "private, max-age=31536000, immutable",
+    },
+  });
 }

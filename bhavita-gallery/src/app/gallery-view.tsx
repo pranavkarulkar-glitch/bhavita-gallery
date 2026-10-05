@@ -7,7 +7,7 @@ export type GalleryCard = {
   fileName: string;
   mimeType: string;
   caption: string | null;
-  thumbnailLink: string | null;
+  hasThumb: boolean;
 };
 
 function fileUrl(id: string, download = false) {
@@ -49,25 +49,53 @@ export function GalleryView({
   async function syncGallery() {
     setSyncing(true);
     setSyncMessage("");
+    let added = 0;
+    let created = 0;
+    let failed = 0;
+    let total = 0;
+
     try {
-      const response = await fetch("/api/sync", { method: "POST" });
-      const body = (await response.json().catch(() => null)) as {
-        newItems?: number;
-        removed?: number;
-        error?: string;
-      } | null;
-      if (!response.ok) {
-        setSyncMessage(body?.error ?? "Sync failed");
+      for (;;) {
+        const response = await fetch("/api/sync", { method: "POST" });
+        const body = (await response.json().catch(() => null)) as {
+          newItems?: number;
+          thumbsCreated?: number;
+          thumbsFailed?: number;
+          remaining?: number;
+          error?: string;
+        } | null;
+        if (!response.ok) {
+          setSyncMessage(body?.error ?? "Sync failed");
+          return;
+        }
+
+        const batchCreated = body?.thumbsCreated ?? 0;
+        const batchFailed = body?.thumbsFailed ?? 0;
+        const remaining = body?.remaining ?? 0;
+        added += body?.newItems ?? 0;
+        created += batchCreated;
+        failed += batchFailed;
+
+        const done = created + failed;
+        if (total === 0) total = done + remaining;
+
+        if (remaining > 0) {
+          if (batchCreated === 0 && batchFailed === 0) {
+            setSyncMessage("Sync failed");
+            return;
+          }
+          setSyncMessage(`Creating thumbnails… ${done} of ${total} done`);
+          continue;
+        }
+
+        const newLabel = added === 1 ? "1 new item" : `${added} new items`;
+        const createdLabel =
+          created === 1 ? "1 thumbnail created" : `${created} thumbnails created`;
+        const failedLabel = failed === 1 ? "1 failed" : `${failed} failed`;
+        setSyncMessage(`${newLabel}, ${createdLabel}, ${failedLabel}`);
+        window.setTimeout(() => window.location.reload(), 1200);
         return;
       }
-      const added = body?.newItems ?? 0;
-      const removed = body?.removed ?? 0;
-      const parts = [
-        added === 1 ? "1 new item" : `${added} new items`,
-        removed === 1 ? "1 removed" : `${removed} removed`,
-      ];
-      setSyncMessage(parts.join(", "));
-      window.setTimeout(() => window.location.reload(), 600);
     } catch {
       setSyncMessage("Sync failed");
     } finally {
@@ -235,26 +263,22 @@ function FolderSection({
 }
 
 function Thumbnail({ item }: { item: GalleryCard }) {
-  const [source, setSource] = useState(
-    item.thumbnailLink ?? `/api/thumb/${encodeURIComponent(item.driveFileId)}`,
-  );
   const video = isVideo(item.mimeType);
+  const source = item.hasThumb
+    ? `/api/thumb/${encodeURIComponent(item.driveFileId)}`
+    : "";
 
   return (
     <span className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-stone-200">
       {source ? (
-        // Thumbnails prefer Drive's thumbnailLink. If that URL fails, fall back to our proxy.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={source}
           alt={item.caption || item.fileName}
+          loading="lazy"
+          decoding="async"
           referrerPolicy="no-referrer"
           className="max-h-full max-w-full object-contain"
-          onError={() => {
-            const fallback = `/api/thumb/${encodeURIComponent(item.driveFileId)}`;
-            if (source !== fallback) setSource(fallback);
-            else setSource("");
-          }}
         />
       ) : (
         <span className="flex h-full items-center justify-center text-sm text-stone-500">

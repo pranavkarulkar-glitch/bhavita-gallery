@@ -12,12 +12,17 @@ type GalleryRow = {
   caption: string | null;
   display_order: number | null;
   created_at: string;
+  thumb_path: string | null;
 };
 
-function fullThumbnail(url: string) {
-  return url
-    .replace(/=w\d+-h\d+(?:-[a-z0-9-]+)*/i, "=s400")
-    .replace(/=s\d+(?:-[a-z0-9-]+)*/i, "=s400");
+function toCard(item: GalleryRow) {
+  return {
+    driveFileId: item.drive_file_id,
+    fileName: item.file_name,
+    mimeType: item.mime_type,
+    caption: item.caption,
+    hasThumb: Boolean(item.thumb_path),
+  };
 }
 
 export default async function Home({
@@ -38,7 +43,9 @@ export default async function Home({
 
   const { data, error } = await supabase
     .from("gallery_items")
-    .select("drive_file_id, file_name, mime_type, caption, display_order, created_at")
+    .select(
+      "drive_file_id, file_name, mime_type, caption, display_order, created_at, thumb_path",
+    )
     .eq("hidden", false)
     .order("display_order", { ascending: true })
     .order("created_at", { ascending: false });
@@ -52,13 +59,7 @@ export default async function Home({
     {
       id: "root",
       title: "Gallery",
-      items: rows.map((item) => ({
-        driveFileId: item.drive_file_id,
-        fileName: item.file_name,
-        mimeType: item.mime_type,
-        caption: item.caption,
-        thumbnailLink: null,
-      })),
+      items: rows.map((item) => toCard(item)),
     },
   ];
 
@@ -77,15 +78,7 @@ export default async function Home({
         title: driveFile.folderPath || library.rootName,
         items: [],
       };
-      section.items.push({
-        driveFileId: item.drive_file_id,
-        fileName: item.file_name,
-        mimeType: item.mime_type,
-        caption: item.caption,
-        thumbnailLink: driveFile.thumbnailLink
-          ? fullThumbnail(driveFile.thumbnailLink)
-          : null,
-      });
+      section.items.push(toCard(item));
       grouped.set(sectionId, section);
     }
 
